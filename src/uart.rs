@@ -50,9 +50,10 @@ impl Uart {
         
         // Set baud rate
         // Baud divisor = UART_CLOCK / (16 * baud_rate)
-        // UART_CLOCK = 3MHz (RPi3)
-        let divisor = 3000000 / (16 * baud_rate);
-        let fractional = ((3000000 * 4 / baud_rate) % 64) & 0x3F;
+        // UART_CLOCK = 48MHz (RPi3) - core-dependent
+        // Note: May need adjustment based on config.txt settings
+        let divisor = 48000000 / (16 * baud_rate);
+        let fractional = ((48000000 * 4 / baud_rate) % 64) & 0x3F;
         
         mmio_write(UART0_IBRD, divisor);
         mmio_write(UART0_FBRD, fractional);
