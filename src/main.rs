@@ -107,7 +107,10 @@ pub extern "C" fn kernel_main() -> ! {
         
         // Simple delay
         for _ in 0..1_000_000 {
-            unsafe { core::ptr::read_volatile(&0 as *const u32); }
+            unsafe { 
+                let dummy = 0u32;
+                core::ptr::read_volatile(&dummy);
+            }
         }
     }
 }

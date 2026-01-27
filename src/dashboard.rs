@@ -1,4 +1,4 @@
-use crate::framebuffer::{Framebuffer, COLOR_BLACK, COLOR_WHITE, COLOR_RED, COLOR_GREEN, COLOR_YELLOW, COLOR_GRAY};
+use crate::framebuffer::{Framebuffer, COLOR_BLACK, COLOR_RED, COLOR_GREEN, COLOR_YELLOW, COLOR_GRAY};
 
 const MAX_DASHBOARD_ELEMENTS: usize = 32;
 
