@@ -1,7 +1,5 @@
-build/
-*.o
-*.elf
+/target/
 *.img
 *.bin
-*.list
-*.map
+*.elf
+Cargo.lock

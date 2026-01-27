@@ -1,0 +1,5 @@
+[build]
+target = "aarch64-rpi.json"
+
+[target.aarch64-rpi]
+rustflags = ["-C", "link-arg=-Tlinker.ld"]

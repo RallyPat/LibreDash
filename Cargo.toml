@@ -1,0 +1,15 @@
+[package]
+name = "libredash"
+version = "0.1.0"
+edition = "2021"
+authors = ["RallyPat"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true
+opt-level = 2
+
+[dependencies]

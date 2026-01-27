@@ -1,5 +1,3 @@
-/* Linker script for Raspberry Pi bare metal */
-
 ENTRY(_start)
 
 SECTIONS
@@ -8,26 +6,26 @@ SECTIONS
     . = 0x80000;
 
     .text : {
-        KEEP(*(.text.boot))
-        *(.text)
+        KEEP(*(.text._start))
+        *(.text*)
     }
 
     .rodata : {
-        *(.rodata)
+        *(.rodata*)
     }
 
     .data : {
-        *(.data)
+        *(.data*)
     }
 
     .bss : {
         __bss_start = .;
-        *(.bss)
+        *(.bss*)
         *(COMMON)
         __bss_end = .;
     }
 
     . = ALIGN(8);
-    . = . + 0x1000; /* 4KB stack */
-    stack_top = .;
+    . = . + 0x8000; /* 32KB stack */
+    __stack_top = .;
 }
