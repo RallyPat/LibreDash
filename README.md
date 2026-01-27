@@ -1,24 +1,27 @@
 # LibreDash
 
-Raspberry Pi bare metal Dashboard Software written in Rust with TS .dash format compatibility.
+Raspberry Pi bare metal Dashboard Software written in Rust, fully compatible with TunerStudio/MegaSquirt .dash and .gauge formats.
 
 ## Overview
 
-LibreDash is a bare metal dashboard application for Raspberry Pi written in Rust that runs directly on the hardware without an operating system. It provides a flexible framework for creating custom dashboards with various visual elements like gauges, graphs, and value displays.
+LibreDash is a bare metal dashboard application for Raspberry Pi written in Rust that runs directly on the hardware without an operating system. It is designed to display TunerStudio/MegaSquirt dashboards exactly as they appear in TunerStudio and Shadow Dash, providing a dedicated, high-performance dashboard display for automotive ECU tuning and monitoring.
 
 ## Features
 
 - **Pure Rust Implementation**: Safe, modern systems programming with Rust
+- **TunerStudio Compatible**: Full support for TunerStudio .dash and gauge formats
+- **INI Gauge Parser**: Reads gauge configurations from mainController.ini files
+- **Authentic Rendering**: Gauges render exactly like TunerStudio/Shadow Dash
+- **Multiple Gauge Styles**:
+  - Horizontal bar gauges
+  - Vertical bar gauges  
+  - Circular needle gauges (analog)
+  - Digital numeric displays
+- **Color-Coded Thresholds**: Automatic green/yellow/red coloring based on warning/danger zones
 - **Bare Metal Performance**: Runs directly on Raspberry Pi hardware (no OS overhead)
 - **No Standard Library**: Uses `#![no_std]` for minimal footprint
 - **Framebuffer Graphics**: Hardware-accelerated display output
-- **Multiple Dashboard Elements**:
-  - Gauges (horizontal bars with percentage fill)
-  - Value displays (with color-coded indicators)
-  - Graphs (with grid lines for data visualization)
-  - Labels (text display areas)
 - **Real-time Updates**: Smooth animation and value updates
-- **.dash Format Support**: Compatible with TS dashboard format (JSON-based)
 
 ## Building
 
@@ -68,32 +71,77 @@ This will generate `kernel8.img` which can be copied to your Raspberry Pi SD car
 - Raspberry Pi 4 Model B (may require config.txt adjustments)
 - Display output via HDMI
 
-## Dashboard Configuration
+## TunerStudio Compatibility
 
-LibreDash supports the `.dash` format for dashboard configuration. See `example.dash` for a sample configuration file.
+LibreDash is designed to be a drop-in replacement for TunerStudio/Shadow Dash displays.
 
-### .dash Format
+### Supported Gauge Configuration Format
 
-The .dash format is a JSON-based configuration that defines dashboard elements:
+LibreDash reads gauge definitions from TunerStudio INI files (`mainController.ini`):
 
-```json
-{
-  "dashboard": {
-    "name": "My Dashboard",
-    "elements": [
-      {
-        "type": "gauge",
-        "x": 50,
-        "y": 50,
-        "width": 400,
-        "height": 60,
-        "color": "#00FF00",
-        "min_value": 0,
-        "max_value": 100
-      }
-    ]
-  }
-}
+```ini
+[GaugeConfigurations]
+tachometer = rpm, "Engine Speed", "RPM", 0, 8000, 300, 600, 7000, 7500, 0, 0
+```
+
+**Format**: `name = var, "title", "units", lo, hi, loD, loW, hiW, hiD, vd, ld`
+
+- **name**: Internal gauge identifier
+- **var**: Variable from ECU OutputChannels
+- **title**: Display title on gauge
+- **units**: Units label (e.g., "RPM", "PSI", "°F")
+- **lo/hi**: Scale minimum/maximum
+- **loD/loW**: Low danger/warning thresholds
+- **hiW/hiD**: High warning/danger thresholds
+- **vd**: Value decimal places
+- **ld**: Label decimal places
+
+### Gauge Styles
+
+LibreDash supports all standard TunerStudio gauge styles:
+
+1. **Horizontal Bar**: Classic left-to-right fill gauge
+2. **Vertical Bar**: Bottom-to-top fill gauge
+3. **Circular/Analog**: Needle gauge with arc scale
+4. **Digital**: Large numeric display with color-coded border
+
+### Color Coding
+
+Gauges automatically change color based on thresholds:
+- **Green**: Normal operating range
+- **Yellow**: Warning zone (approaching limits)
+- **Red**: Danger zone (critical values)
+
+### .dash File Format
+
+### .dash File Format
+
+The TunerStudio .dash file is a binary format that includes:
+- Dashboard layout coordinates
+- Gauge positions and sizes
+- Gauge style selections
+- Embedded fonts and images
+- Background graphics
+
+**Status**: LibreDash currently parses INI gauge configurations. Full binary .dash parsing is in development. See `example.ini` for the supported gauge configuration format.
+
+## Example Gauge Configuration
+
+See `example.ini` for a complete sample INI file with various gauge types:
+
+```ini
+[GaugeConfigurations]
+; Engine gauges
+tachometer = rpm, "Engine Speed", "RPM", 0, 8000, 300, 600, 7000, 7500, 0, 0
+oil_pressure = oilPressure, "Oil Pressure", "PSI", 0, 100, 10, 20, 80, 90, 1, 0
+coolant_temp = coolantTemp, "Coolant Temp", "°F", 0, 250, 50, 80, 220, 240, 0, 0
+
+; Speed and performance
+speed = vehicleSpeed, "Speed", "MPH", 0, 200, 0, 0, 180, 190, 0, 0
+boost = boostPressure, "Boost", "PSI", -15, 30, -5, 0, 25, 28, 1, 0
+
+; Fuel system
+afr = airFuelRatio, "Air/Fuel Ratio", "AFR", 10, 20, 10.5, 12, 16, 18, 2, 1
 ```
 
 ## Project Structure

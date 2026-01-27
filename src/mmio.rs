@@ -2,7 +2,6 @@ use core::ptr;
 
 // Memory-mapped I/O base addresses for Raspberry Pi 3
 const MMIO_BASE: u32 = 0x3F000000;
-const GPIO_BASE: u32 = MMIO_BASE + 0x200000;
 
 // Mailbox registers
 const MAILBOX_BASE: u32 = MMIO_BASE + 0xB880;
