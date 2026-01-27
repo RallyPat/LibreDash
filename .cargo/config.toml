@@ -1,0 +1,9 @@
+[build]
+target = "aarch64-rpi.json"
+
+[unstable]
+build-std = ["core"]
+build-std-features = ["compiler-builtins-mem"]
+
+[target.aarch64-rpi]
+rustflags = ["-C", "link-arg=-Tlinker.ld"]

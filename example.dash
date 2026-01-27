@@ -1,0 +1,57 @@
+{
+  "dashboard": {
+    "name": "Example Dashboard",
+    "version": "1.0",
+    "elements": [
+      {
+        "type": "gauge",
+        "id": "speed",
+        "label": "Speed",
+        "x": 50,
+        "y": 50,
+        "width": 400,
+        "height": 60,
+        "color": "#00FF00",
+        "min_value": 0,
+        "max_value": 200,
+        "unit": "km/h"
+      },
+      {
+        "type": "gauge",
+        "id": "rpm",
+        "label": "RPM",
+        "x": 50,
+        "y": 130,
+        "width": 400,
+        "height": 60,
+        "color": "#0000FF",
+        "min_value": 0,
+        "max_value": 8000,
+        "unit": "rpm"
+      },
+      {
+        "type": "value",
+        "id": "temp",
+        "label": "Temperature",
+        "x": 500,
+        "y": 50,
+        "width": 200,
+        "height": 60,
+        "color": "#00FFFF",
+        "min_value": 0,
+        "max_value": 120,
+        "unit": "°C"
+      },
+      {
+        "type": "graph",
+        "id": "history",
+        "label": "History",
+        "x": 50,
+        "y": 250,
+        "width": 650,
+        "height": 200,
+        "color": "#FFFF00"
+      }
+    ]
+  }
+}
