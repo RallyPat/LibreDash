@@ -1,33 +1,21 @@
-// TunerStudio-compatible gauge rendering
-// Matches the visual style of TunerStudio and Shadow Dash
+/// TunerStudio-compatible gauge rendering engine
+/// Supports multiple gauge styles with color-coded thresholds
+/// Handles value updates and smooth rendering
 
 use crate::framebuffer::Framebuffer;
 use crate::ts_ini_parser::GaugeConfig;
-use crate::math::{sin, cos};
+use crate::colors::{Color, get_gauge_color, colors};
+use crate::math::sin;
+use core::f32::consts::PI;
 
-// TunerStudio color scheme
-pub const TS_COLOR_BACKGROUND: u32 = 0x000000;  // Black
-pub const TS_COLOR_FOREGROUND: u32 = 0xFFFFFF;  // White
-pub const TS_COLOR_NORMAL: u32 = 0x00FF00;      // Green
-pub const TS_COLOR_WARNING: u32 = 0xFFFF00;     // Yellow
-pub const TS_COLOR_DANGER: u32 = 0xFF0000;      // Red
-pub const TS_COLOR_GRID: u32 = 0x404040;        // Dark gray
-pub const TS_COLOR_TEXT: u32 = 0xFFFFFF;        // White
-
-/// Gauge styles matching TunerStudio
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub enum TSGaugeStyle {
-    /// Horizontal bar gauge
-    HorizontalBar,
-    /// Vertical bar gauge
-    VerticalBar,
-    /// Circular needle gauge (analog)
-    Circular,
-    /// Digital numeric display
-    Digital,
+    Circular,       // Analog needle gauge
+    HorizontalBar,  // Left-to-right bar
+    VerticalBar,    // Bottom-to-top bar
+    Digital,        // Large numeric display
 }
 
-/// Gauge instance with current value
 pub struct TSGauge {
     pub config: GaugeConfig,
     pub style: TSGaugeStyle,
@@ -36,10 +24,20 @@ pub struct TSGauge {
     pub width: u32,
     pub height: u32,
     pub current_value: f32,
+    pub last_rendered_value: f32,
+    pub animation_progress: f32,
+    pub dirty: bool,
 }
 
 impl TSGauge {
-    pub fn new(config: GaugeConfig, style: TSGaugeStyle, x: u32, y: u32, width: u32, height: u32) -> Self {
+    pub fn new(
+        config: GaugeConfig,
+        style: TSGaugeStyle,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    ) -> Self {
         TSGauge {
             config,
             style,
@@ -48,256 +46,297 @@ impl TSGauge {
             width,
             height,
             current_value: 0.0,
+            last_rendered_value: 0.0,
+            animation_progress: 0.0,
+            dirty: true,
         }
     }
-    
-    /// Update the current value
+
+    /// Set gauge value and mark as dirty if changed
     pub fn set_value(&mut self, value: f32) {
-        self.current_value = value;
-    }
-    
-    /// Get the color based on current value and thresholds
-    fn get_value_color(&self) -> u32 {
-        let value = self.current_value;
-        
-        if value <= self.config.lo_danger || value >= self.config.hi_danger {
-            TS_COLOR_DANGER
-        } else if value <= self.config.lo_warning || value >= self.config.hi_warning {
-            TS_COLOR_WARNING
+        // Clamp to min/max range
+        let clamped = if value < self.config.lo {
+            self.config.lo
+        } else if value > self.config.hi {
+            self.config.hi
         } else {
-            TS_COLOR_NORMAL
-        }
-    }
-    
-    /// Render the gauge to framebuffer
-    pub fn render(&self, fb: &mut Framebuffer) {
-        match self.style {
-            TSGaugeStyle::HorizontalBar => self.render_horizontal_bar(fb),
-            TSGaugeStyle::VerticalBar => self.render_vertical_bar(fb),
-            TSGaugeStyle::Circular => self.render_circular(fb),
-            TSGaugeStyle::Digital => self.render_digital(fb),
-        }
-    }
-    
-    fn render_horizontal_bar(&self, fb: &mut Framebuffer) {
-        // Draw background
-        fb.draw_filled_rect(self.x, self.y, self.width, self.height, TS_COLOR_BACKGROUND);
-        
-        // Draw border
-        fb.draw_rect(self.x, self.y, self.width, self.height, TS_COLOR_FOREGROUND);
-        
-        // Calculate fill percentage
-        let range = self.config.hi - self.config.lo;
-        let percentage = if range > 0.0 {
-            ((self.current_value - self.config.lo) / range).max(0.0).min(1.0)
-        } else {
-            0.0
+            value
         };
-        
-        // Draw warning/danger zones as background
-        self.draw_threshold_zones_horizontal(fb);
-        
-        // Draw fill bar
-        let bar_height = self.height.saturating_sub(8);
-        let bar_width = (self.width.saturating_sub(8) as f32 * percentage) as u32;
-        let bar_color = self.get_value_color();
-        
-        if bar_width > 0 && bar_height > 0 {
-            fb.draw_filled_rect(self.x + 4, self.y + 4, bar_width, bar_height, bar_color);
-        }
-        
-        // Draw scale marks
-        self.draw_scale_marks_horizontal(fb);
-    }
-    
-    fn render_vertical_bar(&self, fb: &mut Framebuffer) {
-        // Draw background
-        fb.draw_filled_rect(self.x, self.y, self.width, self.height, TS_COLOR_BACKGROUND);
-        
-        // Draw border
-        fb.draw_rect(self.x, self.y, self.width, self.height, TS_COLOR_FOREGROUND);
-        
-        // Calculate fill percentage
+
+        // Mark dirty if value changed significantly (>1% of range)
         let range = self.config.hi - self.config.lo;
-        let percentage = if range > 0.0 {
-            ((self.current_value - self.config.lo) / range).max(0.0).min(1.0)
-        } else {
-            0.0
-        };
+        let change_threshold = range * 0.01;
         
-        // Draw fill bar (bottom to top)
-        let bar_width = self.width.saturating_sub(8);
-        let bar_height = (self.height.saturating_sub(8) as f32 * percentage) as u32;
-        let bar_color = self.get_value_color();
-        let bar_y = self.y + self.height - 4 - bar_height;
-        
-        if bar_width > 0 && bar_height > 0 {
-            fb.draw_filled_rect(self.x + 4, bar_y, bar_width, bar_height, bar_color);
+        if (clamped - self.current_value).abs() > change_threshold {
+            self.dirty = true;
+            self.animation_progress = 0.0;
         }
+
+        self.current_value = clamped;
     }
-    
-    fn render_circular(&self, fb: &mut Framebuffer) {
-        // Draw background circle
-        fb.draw_filled_rect(self.x, self.y, self.width, self.height, TS_COLOR_BACKGROUND);
-        
-        // Draw outer circle
-        let center_x = self.x + self.width / 2;
-        let center_y = self.y + self.height / 2;
-        let radius = self.width.min(self.height) / 2 - 4;
-        
-        self.draw_circle(fb, center_x, center_y, radius, TS_COLOR_FOREGROUND);
-        
-        // Draw scale marks in circle
-        for i in 0..=10 {
-            let angle = -135.0 + (270.0 * i as f32 / 10.0);
-            let angle_rad = angle * 3.14159 / 180.0;
-            let x1 = center_x as i32 + ((radius as f32 * cos(angle_rad)) as i32);
-            let y1 = center_y as i32 + ((radius as f32 * sin(angle_rad)) as i32);
-            let x2 = center_x as i32 + (((radius - 5) as f32 * cos(angle_rad)) as i32);
-            let y2 = center_y as i32 + (((radius - 5) as f32 * sin(angle_rad)) as i32);
-            
-            if x1 >= 0 && y1 >= 0 && x2 >= 0 && y2 >= 0 {
-                self.draw_line(fb, x1 as u32, y1 as u32, x2 as u32, y2 as u32, TS_COLOR_GRID);
-            }
-        }
-        
-        // Draw needle
-        let range = self.config.hi - self.config.lo;
-        let percentage = if range > 0.0 {
-            ((self.current_value - self.config.lo) / range).max(0.0).min(1.0)
-        } else {
-            0.0
-        };
-        
-        let needle_angle = -135.0 + (270.0 * percentage);
-        let needle_angle_rad = needle_angle * 3.14159 / 180.0;
-        let needle_x = center_x as i32 + (((radius - 10) as f32 * cos(needle_angle_rad)) as i32);
-        let needle_y = center_y as i32 + (((radius - 10) as f32 * sin(needle_angle_rad)) as i32);
-        
-        let needle_color = self.get_value_color();
-        if needle_x >= 0 && needle_y >= 0 {
-            self.draw_line(fb, center_x, center_y, needle_x as u32, needle_y as u32, needle_color);
-        }
+
+    /// Get interpolated value for animation (0.0 to 1.0 progress)
+    pub fn get_animated_value(&self) -> f32 {
+        // Linear interpolation from last rendered to current
+        let progress = self.animation_progress.min(1.0);
+        self.last_rendered_value + (self.current_value - self.last_rendered_value) * progress
     }
-    
-    fn render_digital(&self, fb: &mut Framebuffer) {
-        // Draw background
-        fb.draw_filled_rect(self.x, self.y, self.width, self.height, TS_COLOR_BACKGROUND);
-        
-        // Draw border with color based on value
-        let border_color = self.get_value_color();
-        fb.draw_rect(self.x, self.y, self.width, self.height, border_color);
-        fb.draw_rect(self.x + 1, self.y + 1, self.width - 2, self.height - 2, border_color);
-        
-        // Value would be drawn here with text rendering
-        // For now, just show a colored indicator
-        let indicator_width = self.width / 3;
-        let indicator_height = self.height / 3;
-        let indicator_x = self.x + (self.width - indicator_width) / 2;
-        let indicator_y = self.y + (self.height - indicator_height) / 2;
-        
-        fb.draw_filled_rect(indicator_x, indicator_y, indicator_width, indicator_height, border_color);
+
+    /// Get gauge color based on current value
+    pub fn get_color(&self) -> Color {
+        get_gauge_color(
+            self.current_value,
+            self.config.lo_danger,
+            self.config.lo_warning,
+            self.config.hi_warning,
+            self.config.hi_danger,
+        )
     }
-    
-    fn draw_threshold_zones_horizontal(&self, fb: &mut Framebuffer) {
+
+    /// Normalize value to 0.0-1.0 range based on min/max
+    pub fn get_normalized_value(&self, value: f32) -> f32 {
         let range = self.config.hi - self.config.lo;
         if range <= 0.0 {
+            return 0.0;
+        }
+        ((value - self.config.lo) / range).max(0.0).min(1.0)
+    }
+
+    /// Render gauge to framebuffer
+    pub fn render(&mut self, fb: &mut Framebuffer) {
+        if !self.dirty && self.animation_progress >= 1.0 {
+            return; // Nothing to render
+        }
+
+        match self.style {
+            TSGaugeStyle::Circular => self.render_circular(fb),
+            TSGaugeStyle::HorizontalBar => self.render_horizontal_bar(fb),
+            TSGaugeStyle::VerticalBar => self.render_vertical_bar(fb),
+            TSGaugeStyle::Digital => self.render_digital(fb),
+        }
+
+        self.animation_progress += 0.5; // Advance animation
+        if self.animation_progress >= 1.0 {
+            self.last_rendered_value = self.current_value;
+            self.dirty = false;
+        }
+    }
+
+    /// Render circular needle gauge
+    fn render_circular(&mut self, fb: &mut Framebuffer) {
+        let center_x = self.x + self.width / 2;
+        let center_y = self.y + self.height / 2;
+        let radius = (self.width.min(self.height) / 2) as f32 * 0.85;
+
+        let color = self.get_color();
+
+        // Draw outer circle (border)
+        self.draw_circle(fb, center_x, center_y, radius as u32, color.to_u32());
+
+        // Draw background circle
+        if radius > 5.0 {
+            self.draw_circle(fb, center_x, center_y, (radius - 5.0) as u32, colors::DARK_GRAY.to_u32());
+        }
+
+        // Calculate needle angle: -180° to 0° for typical gauge
+        let normalized = self.get_normalized_value(self.get_animated_value());
+        let angle_degrees = -180.0 + (normalized * 180.0);
+        let angle_rad = angle_degrees * PI / 180.0;
+
+        // Draw needle using sine/cosine
+        let needle_length = (radius * 0.75) as i32;
+        let cos_angle = sin(angle_rad + PI / 2.0); // cos = sin(x + π/2)
+        let sin_angle = sin(angle_rad);
+        
+        let needle_end_x = center_x as i32 + (cos_angle * needle_length as f32) as i32;
+        let needle_end_y = center_y as i32 + (sin_angle * needle_length as f32) as i32;
+
+        self.draw_line(
+            fb,
+            center_x as i32,
+            center_y as i32,
+            needle_end_x,
+            needle_end_y,
+            color.to_u32(),
+        );
+
+        // Draw center dot
+        fb.draw_filled_rect(center_x - 3, center_y - 3, 6, 6, color.to_u32());
+
+        // Draw title below gauge
+        self.draw_title(fb, color);
+    }
+
+    /// Render horizontal bar gauge
+    fn render_horizontal_bar(&mut self, fb: &mut Framebuffer) {
+        let color = self.get_color();
+        let normalized = self.get_normalized_value(self.get_animated_value());
+        let fill_width = (self.width as f32 * normalized) as u32;
+
+        // Draw border
+        fb.draw_rect(self.x, self.y, self.width, self.height, color.to_u32());
+
+        // Draw background
+        fb.draw_filled_rect(self.x + 2, self.y + 2, self.width - 4, self.height - 4, colors::DARK_GRAY.to_u32());
+
+        // Draw fill
+        if fill_width > 0 {
+            fb.draw_filled_rect(
+                self.x + 2,
+                self.y + 2,
+                fill_width.saturating_sub(4),
+                self.height - 4,
+                color.to_u32(),
+            );
+        }
+
+        // Draw title
+        self.draw_title(fb, color);
+    }
+
+    /// Render vertical bar gauge
+    fn render_vertical_bar(&mut self, fb: &mut Framebuffer) {
+        let color = self.get_color();
+        let normalized = self.get_normalized_value(self.get_animated_value());
+        let fill_height = (self.height as f32 * normalized) as u32;
+
+        // Draw border
+        fb.draw_rect(self.x, self.y, self.width, self.height, color.to_u32());
+
+        // Draw background
+        fb.draw_filled_rect(self.x + 2, self.y + 2, self.width - 4, self.height - 4, colors::DARK_GRAY.to_u32());
+
+        // Draw fill from bottom up
+        if fill_height > 0 {
+            let fill_y = self.y + self.height.saturating_sub(2).saturating_sub(fill_height);
+            fb.draw_filled_rect(
+                self.x + 2,
+                fill_y,
+                self.width - 4,
+                fill_height.saturating_sub(4),
+                color.to_u32(),
+            );
+        }
+
+        // Draw title
+        self.draw_title(fb, color);
+    }
+
+    /// Render digital numeric display with colored border
+    fn render_digital(&mut self, fb: &mut Framebuffer) {
+        let color = self.get_color();
+        let value = self.get_animated_value();
+
+        // Draw colored border frame
+        fb.draw_rect(self.x, self.y, self.width, self.height, color.to_u32());
+        fb.draw_rect(
+            self.x + 1,
+            self.y + 1,
+            self.width.saturating_sub(2),
+            self.height.saturating_sub(2),
+            color.to_u32(),
+        );
+
+        // Draw dark background
+        fb.draw_filled_rect(
+            self.x + 4,
+            self.y + 4,
+            self.width.saturating_sub(8),
+            self.height.saturating_sub(8),
+            colors::DARK_GRAY.to_u32(),
+        );
+
+        // Draw numeric value using digit renderer
+        let digit_size = (self.height / 3).min(20);
+        let text_x = self.x + 10;
+        let text_y = self.y + (self.height.saturating_sub(digit_size * 2)) / 2;
+
+        crate::digit_renderer::draw_float(fb, value, 4, 1, text_x, text_y, digit_size, color);
+
+        // Draw title
+        self.draw_title(fb, color);
+    }
+
+    /// Draw gauge title text (simplified - using rectangles as placeholder)
+    fn draw_title(&self, fb: &mut Framebuffer, color: Color) {
+        // Placeholder: Draw a small rectangle below gauge for title area
+        let title_y = self.y + self.height + 2;
+        fb.draw_filled_rect(self.x, title_y, self.width, 10, colors::BLACK.to_u32());
+    }
+
+    /// Draw circle using Bresenham-style algorithm
+    fn draw_circle(&self, fb: &mut Framebuffer, cx: u32, cy: u32, radius: u32, color: u32) {
+        if radius == 0 {
             return;
         }
-        
-        let bar_height = self.height.saturating_sub(8);
-        let total_width = self.width.saturating_sub(8);
-        
-        // Draw danger zones
-        if self.config.lo_danger > self.config.lo {
-            let zone_width = ((self.config.lo_danger - self.config.lo) / range * total_width as f32) as u32;
-            fb.draw_filled_rect(self.x + 4, self.y + 4, zone_width, bar_height, 0x400000); // Dark red
-        }
-        
-        if self.config.hi_danger < self.config.hi {
-            let zone_start = ((self.config.hi_danger - self.config.lo) / range * total_width as f32) as u32;
-            let zone_width = total_width - zone_start;
-            fb.draw_filled_rect(self.x + 4 + zone_start, self.y + 4, zone_width, bar_height, 0x400000);
-        }
-    }
-    
-    fn draw_scale_marks_horizontal(&self, fb: &mut Framebuffer) {
-        let marks = 10;
-        let mark_spacing = (self.width.saturating_sub(8)) / marks;
-        
-        for i in 0..=marks {
-            let x = self.x + 4 + (i * mark_spacing);
-            let y = self.y + self.height - 4;
-            fb.draw_filled_rect(x, y - 3, 1, 3, TS_COLOR_GRID);
-        }
-    }
-    
-    fn draw_circle(&self, fb: &mut Framebuffer, cx: u32, cy: u32, radius: u32, color: u32) {
+
         let r = radius as i32;
-        let mut x = 0;
-        let mut y = r;
-        let mut d = 3 - 2 * r;
-        
-        while x <= y {
-            self.draw_circle_points(fb, cx, cy, x, y, color);
-            x += 1;
-            if d < 0 {
-                d = d + 4 * x + 6;
+        let mut x = r;
+        let mut y = 0;
+        let mut decision_parameter = 3 - 2 * r;
+
+        while x >= y {
+            // Draw 8 symmetric points
+            self.draw_circle_point(fb, cx, cy, x as u32, y as u32, color);
+            self.draw_circle_point(fb, cx, cy, y as u32, x as u32, color);
+
+            if decision_parameter <= 0 {
+                decision_parameter = decision_parameter + 4 * y + 6;
             } else {
-                y -= 1;
-                d = d + 4 * (x - y) + 10;
+                decision_parameter = decision_parameter + 4 * (y - x) + 10;
+                x -= 1;
             }
+            y += 1;
         }
     }
-    
-    fn draw_circle_points(&self, fb: &mut Framebuffer, cx: u32, cy: u32, x: i32, y: i32, color: u32) {
+
+    /// Draw circle points in 8 symmetric positions
+    fn draw_circle_point(&self, fb: &mut Framebuffer, cx: u32, cy: u32, x: u32, y: u32, color: u32) {
         let points = [
-            (cx as i32 + x, cy as i32 + y),
-            (cx as i32 - x, cy as i32 + y),
-            (cx as i32 + x, cy as i32 - y),
-            (cx as i32 - x, cy as i32 - y),
-            (cx as i32 + y, cy as i32 + x),
-            (cx as i32 - y, cy as i32 + x),
-            (cx as i32 + y, cy as i32 - x),
-            (cx as i32 - y, cy as i32 - x),
+            (cx + x, cy + y),
+            (cx - x, cy + y),
+            (cx + x, cy - y),
+            (cx - x, cy - y),
+            (cx + y, cy + x),
+            (cx - y, cy + x),
+            (cx + y, cy - x),
+            (cx - y, cy - x),
         ];
-        
-        for (px, py) in points.iter() {
-            if *px >= 0 && *py >= 0 {
-                fb.draw_pixel(*px as u32, *py as u32, color);
+
+        for (px, py) in &points {
+            if *px < 1280 && *py < 720 {
+                fb.draw_filled_rect(*px - 1, *py - 1, 2, 2, color);
             }
         }
     }
-    
-    fn draw_line(&self, fb: &mut Framebuffer, x0: u32, y0: u32, x1: u32, y1: u32, color: u32) {
-        let mut x0 = x0 as i32;
-        let mut y0 = y0 as i32;
-        let x1 = x1 as i32;
-        let y1 = y1 as i32;
-        
+
+    /// Draw line using Bresenham algorithm
+    fn draw_line(&self, fb: &mut Framebuffer, x0: i32, y0: i32, x1: i32, y1: i32, color: u32) {
         let dx = (x1 - x0).abs();
         let dy = (y1 - y0).abs();
         let sx = if x0 < x1 { 1 } else { -1 };
         let sy = if y0 < y1 { 1 } else { -1 };
-        let mut err = dx - dy;
-        
+        let mut err = dx as i32 - dy as i32;
+        let mut x = x0;
+        let mut y = y0;
+
         loop {
-            if x0 >= 0 && y0 >= 0 {
-                fb.draw_pixel(x0 as u32, y0 as u32, color);
+            if x >= 0 && x < 1280 && y >= 0 && y < 720 {
+                fb.draw_filled_rect(x as u32, y as u32, 2, 2, color);
             }
-            
-            if x0 == x1 && y0 == y1 {
+
+            if x == x1 && y == y1 {
                 break;
             }
-            
+
             let e2 = 2 * err;
-            if e2 > -dy {
-                err -= dy;
-                x0 += sx;
+            if e2 > -(dy as i32) {
+                err -= dy as i32;
+                x += sx;
             }
-            if e2 < dx {
-                err += dx;
-                y0 += sy;
+            if e2 < dx as i32 {
+                err += dx as i32;
+                y += sy;
             }
         }
     }

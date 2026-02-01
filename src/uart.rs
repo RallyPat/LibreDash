@@ -1,7 +1,4 @@
-// UART driver for serial communication with ECU
-// Optimized for fast initialization and low latency
-
-use crate::mmio::{mmio_write, mmio_read};
+﻿use core::ptr;
 
 const UART0_BASE: u32 = 0x3F201000;
 const UART0_DR: u32 = UART0_BASE + 0x00;
@@ -17,125 +14,81 @@ const GPFSEL1: u32 = GPIO_BASE + 0x04;
 const GPPUD: u32 = GPIO_BASE + 0x94;
 const GPPUDCLK0: u32 = GPIO_BASE + 0x98;
 
-pub struct Uart {
-    initialized: bool,
-}
+const UART_FR_TXFF: u32 = 1 << 5;
 
-impl Uart {
-    pub fn new() -> Self {
-        Uart { initialized: false }
-    }
-    
-    /// Initialize UART for fast ECU communication
-    /// Standard baud rates: 9600, 19200, 38400, 57600, 115200
-    pub fn init(&mut self, baud_rate: u32) {
-        // Disable UART
-        mmio_write(UART0_CR, 0);
-        
-        // Setup GPIO pins 14 & 15 for UART
-        let mut ra = mmio_read(GPFSEL1);
-        ra &= !((7 << 12) | (7 << 15)); // Clear GPIO 14 & 15
-        ra |= (4 << 12) | (4 << 15);    // Alt 0 for UART
-        mmio_write(GPFSEL1, ra);
-        
-        // Disable pull up/down for pins 14 & 15
-        mmio_write(GPPUD, 0);
-        delay(150);
-        mmio_write(GPPUDCLK0, (1 << 14) | (1 << 15));
-        delay(150);
-        mmio_write(GPPUDCLK0, 0);
-        
-        // Clear interrupts
-        mmio_write(UART0_ICR, 0x7FF);
-        
-        // Set baud rate
-        // Baud divisor = UART_CLOCK / (16 * baud_rate)
-        // UART_CLOCK = 48MHz (RPi3) - core-dependent
-        // Note: May need adjustment based on config.txt settings
-        let divisor = 48000000 / (16 * baud_rate);
-        let fractional = ((48000000 * 4 / baud_rate) % 64) & 0x3F;
-        
-        mmio_write(UART0_IBRD, divisor);
-        mmio_write(UART0_FBRD, fractional);
-        
-        // Enable FIFO, 8N1 (8 bits, no parity, 1 stop bit)
-        mmio_write(UART0_LCRH, (1 << 4) | (3 << 5));
-        
-        // Enable UART, TX, RX
-        mmio_write(UART0_CR, (1 << 0) | (1 << 8) | (1 << 9));
-        
-        self.initialized = true;
-    }
-    
-    /// Send a single byte (non-blocking check, then wait)
-    pub fn send_byte(&self, byte: u8) {
-        // Wait for UART to be ready
-        while (mmio_read(UART0_FR) & (1 << 5)) != 0 {}
-        mmio_write(UART0_DR, byte as u32);
-    }
-    
-    /// Send multiple bytes
-    pub fn send_bytes(&self, data: &[u8]) {
-        for &byte in data {
-            self.send_byte(byte);
+fn delay(count: u32) {
+    for _ in 0..count {
+        unsafe { 
+            let dummy = 0u32;
+            core::ptr::read_volatile(&dummy); 
         }
     }
-    
-    /// Receive a single byte (blocking with timeout)
-    pub fn recv_byte(&self, timeout_cycles: u32) -> Option<u8> {
-        let mut cycles = 0;
+}
+
+pub fn uart_init() {
+    unsafe {
+        ptr::write_volatile(UART0_CR as *mut u32, 0);
         
-        // Wait for data to be available
-        while (mmio_read(UART0_FR) & (1 << 4)) != 0 {
-            cycles += 1;
-            if cycles > timeout_cycles {
-                return None;
+        let mut ra = ptr::read_volatile(GPFSEL1 as *const u32);
+        ra &= !(7 << 12);
+        ra |= 4 << 12;
+        ra &= !(7 << 15);
+        ra |= 4 << 15;
+        ptr::write_volatile(GPFSEL1 as *mut u32, ra);
+        
+        ptr::write_volatile(GPPUD as *mut u32, 0);
+        delay(150);
+        ptr::write_volatile(GPPUDCLK0 as *mut u32, (1 << 14) | (1 << 15));
+        delay(150);
+        ptr::write_volatile(GPPUDCLK0 as *mut u32, 0);
+        
+        ptr::write_volatile(UART0_ICR as *mut u32, 0x7FF);
+        ptr::write_volatile(UART0_IBRD as *mut u32, 1);
+        ptr::write_volatile(UART0_FBRD as *mut u32, 40);
+        ptr::write_volatile(UART0_LCRH as *mut u32, 0x70);
+        ptr::write_volatile(UART0_CR as *mut u32, 0x301);
+    }
+}
+
+pub fn uart_putc(byte: u8) {
+    unsafe {
+        while (ptr::read_volatile(UART0_FR as *const u32) & UART_FR_TXFF) != 0 {}
+        ptr::write_volatile(UART0_DR as *mut u32, byte as u32);
+    }
+}
+
+pub fn uart_puts(s: &str) {
+    for byte in s.bytes() {
+        if byte == b'\n' {
+            uart_putc(b'\r');
+        }
+        uart_putc(byte);
+    }
+}
+
+fn hex_digit(val: u8) -> u8 {
+    if val < 10 { b'0' + val } else { b'a' + (val - 10) }
+}
+
+pub fn uart_hex_dump(addr: *const u8, len: usize) {
+    for i in (0..len).step_by(16) {
+        // Print address
+        for shift in (0..8).rev() {
+            uart_putc(hex_digit(((i >> (shift * 4)) & 0xF) as u8));
+        }
+        uart_puts(": ");
+        
+        // Print hex bytes
+        for j in 0..16 {
+            if i + j < len {
+                unsafe {
+                    let byte = *addr.add(i + j);
+                    uart_putc(hex_digit((byte >> 4) & 0xF));
+                    uart_putc(hex_digit(byte & 0xF));
+                    uart_putc(b' ');
+                }
             }
         }
-        
-        Some((mmio_read(UART0_DR) & 0xFF) as u8)
-    }
-    
-    /// Check if data is available to read
-    pub fn has_data(&self) -> bool {
-        (mmio_read(UART0_FR) & (1 << 4)) == 0
-    }
-    
-    /// Receive multiple bytes into buffer (with timeout)
-    pub fn recv_bytes(&self, buffer: &mut [u8], timeout_cycles: u32) -> usize {
-        let mut count = 0;
-        
-        for i in 0..buffer.len() {
-            if let Some(byte) = self.recv_byte(timeout_cycles) {
-                buffer[i] = byte;
-                count += 1;
-            } else {
-                break;
-            }
-        }
-        
-        count
-    }
-    
-    /// Flush receive buffer
-    pub fn flush_rx(&self) {
-        while self.has_data() {
-            let _ = mmio_read(UART0_DR);
-        }
-    }
-}
-
-/// Simple delay function (CPU cycles)
-fn delay(cycles: u32) {
-    for _ in 0..cycles {
-        unsafe {
-            core::ptr::read_volatile(&0u32);
-        }
-    }
-}
-
-impl Default for Uart {
-    fn default() -> Self {
-        Self::new()
+        uart_putc(b'\n');
     }
 }

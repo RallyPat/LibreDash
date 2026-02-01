@@ -1,7 +1,7 @@
 // MegaSquirt serial protocol implementation
 // Fast, efficient ECU communication for real-time data
 
-use crate::uart::Uart;
+// use crate::uart::Uart;
 
 /// MegaSquirt command codes
 const MS_CMD_SIGNATURE: u8 = b'S';
@@ -17,7 +17,7 @@ const TIMEOUT_CYCLES: u32 = 100000;
 
 /// MegaSquirt ECU interface
 pub struct MegaSquirt {
-    uart: Uart,
+    // uart: Uart,
     connected: bool,
     realtime_buffer: [u8; MAX_RESPONSE_SIZE],
     realtime_size: usize,
@@ -26,7 +26,7 @@ pub struct MegaSquirt {
 impl MegaSquirt {
     pub fn new() -> Self {
         MegaSquirt {
-            uart: Uart::new(),
+            // uart: Uart::new(),
             connected: false,
             realtime_buffer: [0; MAX_RESPONSE_SIZE],
             realtime_size: 0,
@@ -37,10 +37,10 @@ impl MegaSquirt {
     pub fn connect(&mut self, baud_rate: u32) -> bool {
         // Initialize UART with specified baud rate
         // Common MegaSquirt baud rates: 9600, 19200, 38400, 57600, 115200
-        self.uart.init(baud_rate);
+        // self.uart.init(baud_rate);
         
         // Flush any pending data
-        self.uart.flush_rx();
+        // self.uart.flush_rx();
         
         // Try to get signature
         if self.get_signature().is_some() {
@@ -53,10 +53,10 @@ impl MegaSquirt {
     
     /// Get ECU signature (for verification)
     pub fn get_signature(&mut self) -> Option<[u8; 32]> {
-        self.uart.send_byte(MS_CMD_SIGNATURE);
+        // self.uart.send_byte(MS_CMD_SIGNATURE);
         
         let mut sig = [0u8; 32];
-        let received = self.uart.recv_bytes(&mut sig, TIMEOUT_CYCLES);
+        let received = // self.uart.recv_bytes(&mut sig, TIMEOUT_CYCLES);
         
         if received == 32 {
             Some(sig)
@@ -72,12 +72,12 @@ impl MegaSquirt {
         }
         
         // Send real-time data request
-        self.uart.send_byte(MS_CMD_REALTIME);
+        // self.uart.send_byte(MS_CMD_REALTIME);
         
         // Receive response
         // MS1/MS2: typically 22-119 bytes depending on version
         // MS3: can be larger
-        let received = self.uart.recv_bytes(&mut self.realtime_buffer, TIMEOUT_CYCLES);
+        let received = // self.uart.recv_bytes(&mut self.realtime_buffer, TIMEOUT_CYCLES);
         
         if received > 0 {
             self.realtime_size = received;
@@ -236,3 +236,5 @@ impl Default for ECUData {
         Self::new()
     }
 }
+
+
